@@ -1,113 +1,232 @@
-import Image from "next/image";
+"use client";
+import Link from "next/link";
+import { motion } from "framer-motion";
+import {
+  ArrowRight,
+  CheckCircle,
+  GraduationCap,
+  FileText,
+  Zap,
+  RotateCcw,
+  MessageSquare,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import ProductDemo from "@/components/landing/ProductDemo";
 
-export default function Home() {
+const steps = [
+  { icon: FileText, step: "01", title: "Upload", desc: "Any PDF — lecture slides, textbook chapters, past papers." },
+  { icon: Zap, step: "02", title: "Generate", desc: "Claude reads every page and writes targeted flashcards." },
+  { icon: RotateCcw, step: "03", title: "Study", desc: "Cards surface at the right moment via spaced repetition." },
+  { icon: MessageSquare, step: "04", title: "Ask", desc: "The AI tutor explains anything until it makes sense." },
+];
+
+const freeTier = ["30 flashcards / month", "2 tutor sessions", "Spaced repetition", "Progress stats"];
+const premiumTier = ["Unlimited flashcards", "Unlimited AI tutoring", "Advanced analytics", "Priority support"];
+
+export default function LandingPage() {
   return (
-    <main className="flex min-h-screen flex-col items-center justify-between p-24">
-      <div className="z-10 w-full max-w-5xl items-center justify-between font-mono text-sm lg:flex">
-        <p className="fixed left-0 top-0 flex w-full justify-center border-b border-gray-300 bg-gradient-to-b from-zinc-200 pb-6 pt-8 backdrop-blur-2xl dark:border-neutral-800 dark:bg-zinc-800/30 dark:from-inherit lg:static lg:w-auto  lg:rounded-xl lg:border lg:bg-gray-200 lg:p-4 lg:dark:bg-zinc-800/30">
-          Get started by editing&nbsp;
-          <code className="font-mono font-bold">src/app/page.tsx</code>
-        </p>
-        <div className="fixed bottom-0 left-0 flex h-48 w-full items-end justify-center bg-gradient-to-t from-white via-white dark:from-black dark:via-black lg:static lg:size-auto lg:bg-none">
-          <a
-            className="pointer-events-none flex place-items-center gap-2 p-8 lg:pointer-events-auto lg:p-0"
-            href="https://vercel.com?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            By{" "}
-            <Image
-              src="/vercel.svg"
-              alt="Vercel Logo"
-              className="dark:invert"
-              width={100}
-              height={24}
-              priority
-            />
-          </a>
+    <div className="min-h-screen bg-white text-gray-900 overflow-x-hidden">
+
+      {/* Nav */}
+      <nav className="flex items-center justify-between px-6 md:px-14 h-14 border-b border-gray-100 sticky top-0 bg-white/95 backdrop-blur-sm z-40">
+        <div className="flex items-center gap-2">
+          <div className="w-7 h-7 rounded-lg bg-indigo-500 flex items-center justify-center">
+            <GraduationCap className="w-4 h-4 text-white" />
+          </div>
+          <span className="font-semibold text-sm">Cards to Study</span>
         </div>
-      </div>
+        <div className="flex items-center gap-2">
+          <Link href="/sign-in"><Button variant="ghost" size="sm">Sign in</Button></Link>
+          <Link href="/sign-up"><Button size="sm">Get started</Button></Link>
+        </div>
+      </nav>
 
-      <div className="relative z-[-1] flex place-items-center before:absolute before:h-[300px] before:w-full before:-translate-x-1/2 before:rounded-full before:bg-gradient-radial before:from-white before:to-transparent before:blur-2xl before:content-[''] after:absolute after:-z-20 after:h-[180px] after:w-full after:translate-x-1/3 after:bg-gradient-conic after:from-sky-200 after:via-blue-200 after:blur-2xl after:content-[''] before:dark:bg-gradient-to-br before:dark:from-transparent before:dark:to-blue-700 before:dark:opacity-10 after:dark:from-sky-900 after:dark:via-[#0141ff] after:dark:opacity-40 sm:before:w-[480px] sm:after:w-[240px] before:lg:h-[360px]">
-        <Image
-          className="relative dark:drop-shadow-[0_0_0.3rem_#ffffff70] dark:invert"
-          src="/next.svg"
-          alt="Next.js Logo"
-          width={180}
-          height={37}
-          priority
-        />
-      </div>
+      {/* Hero */}
+      <section className="px-6 md:px-14 pt-20 pb-24">
+        <div className="max-w-5xl mx-auto">
+          <motion.div
+            initial={{ opacity: 0, y: 24 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.55, ease: "easeOut" }}
+            className="max-w-2xl"
+          >
+            <div className="inline-flex items-center gap-2 text-xs font-medium text-indigo-600 bg-indigo-50 border border-indigo-100 rounded-full px-3 py-1.5 mb-7">
+              <Zap className="w-3.5 h-3.5" />
+              Powered by Claude AI
+            </div>
+            <h1 className="text-5xl md:text-6xl font-bold text-gray-900 leading-[1.08] tracking-tight mb-6">
+              Turn your notes into<br />
+              <span className="text-indigo-500">exam confidence</span>
+            </h1>
+            <p className="text-lg text-gray-500 leading-relaxed mb-9 max-w-lg">
+              Upload a PDF. Claude reads it and builds personalised flashcards, a spaced study plan, and an AI tutor — all calibrated to your exam.
+            </p>
+            <div className="flex items-center gap-3">
+              <Link href="/sign-up">
+                <Button size="lg" className="gap-2 h-12 px-6 text-base">
+                  Start for free <ArrowRight className="w-4 h-4" />
+                </Button>
+              </Link>
+              <Link href="/sign-in">
+                <Button variant="outline" size="lg" className="h-12 px-6 text-base">
+                  Sign in
+                </Button>
+              </Link>
+            </div>
+            <p className="text-xs text-gray-400 mt-4">
+              Free tier includes 30 flashcards a month. No card needed.
+            </p>
+          </motion.div>
+        </div>
+      </section>
 
-      <div className="mb-32 grid text-center lg:mb-0 lg:w-full lg:max-w-5xl lg:grid-cols-4 lg:text-left">
-        <a
-          href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className="mb-3 text-2xl font-semibold">
-            Docs{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className="m-0 max-w-[30ch] text-sm opacity-50">
-            Find in-depth information about Next.js features and API.
-          </p>
-        </a>
+      {/* Product demo */}
+      <section className="px-6 md:px-14 pb-24">
+        <div className="max-w-5xl mx-auto">
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.5 }}
+            className="mb-10"
+          >
+            <h2 className="text-2xl md:text-3xl font-bold text-gray-900 mb-2">
+              See it in action
+            </h2>
+            <p className="text-gray-500 text-sm">
+              Click each tab to explore the features.
+            </p>
+          </motion.div>
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.5, delay: 0.1 }}
+          >
+            <ProductDemo />
+          </motion.div>
+        </div>
+      </section>
 
-        <a
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className="mb-3 text-2xl font-semibold">
-            Learn{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className="m-0 max-w-[30ch] text-sm opacity-50">
-            Learn about Next.js in an interactive course with&nbsp;quizzes!
-          </p>
-        </a>
+      {/* How it works */}
+      <section className="px-6 md:px-14 py-24 bg-gray-50/70">
+        <div className="max-w-4xl mx-auto">
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.5 }}
+            className="mb-14"
+          >
+            <h2 className="text-2xl md:text-3xl font-bold text-gray-900 mb-3">
+              From PDF to exam-ready
+            </h2>
+            <p className="text-gray-500">Four steps. No setup.</p>
+          </motion.div>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+            {steps.map(({ icon: Icon, step, title, desc }, i) => (
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, y: 16 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }}
+                transition={{ duration: 0.4, delay: i * 0.08 }}
+              >
+                <div className="w-10 h-10 rounded-xl bg-white border border-gray-200 flex items-center justify-center shadow-sm mb-3">
+                  <Icon className="w-4 h-4 text-indigo-500" />
+                </div>
+                <p className="text-xs font-semibold text-indigo-400 mb-1 tracking-wide">{step}</p>
+                <h3 className="font-semibold text-gray-900 mb-1">{title}</h3>
+                <p className="text-sm text-gray-500 leading-relaxed">{desc}</p>
+              </motion.div>
+            ))}
+          </div>
+        </div>
+      </section>
 
-        <a
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className="mb-3 text-2xl font-semibold">
-            Templates{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className="m-0 max-w-[30ch] text-sm opacity-50">
-            Explore starter templates for Next.js.
-          </p>
-        </a>
+      {/* Pricing */}
+      <section className="px-6 md:px-14 py-24">
+        <div className="max-w-3xl mx-auto">
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.5 }}
+            className="mb-12"
+          >
+            <h2 className="text-2xl md:text-3xl font-bold text-gray-900 mb-3">Simple pricing</h2>
+            <p className="text-gray-500">Start free, upgrade when you need more.</p>
+          </motion.div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.4 }}
+              className="border border-gray-200 rounded-2xl p-6 bg-white"
+            >
+              <p className="text-sm text-gray-400 mb-1">Free</p>
+              <p className="text-4xl font-bold text-gray-900 mb-5">
+                £0 <span className="text-base font-normal text-gray-400">/ month</span>
+              </p>
+              <ul className="space-y-3 mb-7">
+                {freeTier.map((f) => (
+                  <li key={f} className="flex items-center gap-2.5 text-sm text-gray-600">
+                    <CheckCircle className="w-4 h-4 text-emerald-500 shrink-0" />
+                    {f}
+                  </li>
+                ))}
+              </ul>
+              <Link href="/sign-up" className="block">
+                <Button variant="outline" className="w-full">Get started</Button>
+              </Link>
+            </motion.div>
 
-        <a
-          href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template&utm_campaign=create-next-app"
-          className="group rounded-lg border border-transparent px-5 py-4 transition-colors hover:border-gray-300 hover:bg-gray-100 hover:dark:border-neutral-700 hover:dark:bg-neutral-800/30"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <h2 className="mb-3 text-2xl font-semibold">
-            Deploy{" "}
-            <span className="inline-block transition-transform group-hover:translate-x-1 motion-reduce:transform-none">
-              -&gt;
-            </span>
-          </h2>
-          <p className="m-0 max-w-[30ch] text-balance text-sm opacity-50">
-            Instantly deploy your Next.js site to a shareable URL with Vercel.
-          </p>
-        </a>
-      </div>
-    </main>
+            <motion.div
+              initial={{ opacity: 0, y: 16 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ duration: 0.4, delay: 0.08 }}
+              className="border border-indigo-500 rounded-2xl p-6 bg-indigo-500"
+            >
+              <p className="text-sm text-indigo-200 mb-1">Premium</p>
+              <p className="text-4xl font-bold text-white mb-5">
+                £9 <span className="text-base font-normal text-indigo-200">/ month</span>
+              </p>
+              <ul className="space-y-3 mb-7">
+                {premiumTier.map((f) => (
+                  <li key={f} className="flex items-center gap-2.5 text-sm text-indigo-100">
+                    <CheckCircle className="w-4 h-4 text-white/80 shrink-0" />
+                    {f}
+                  </li>
+                ))}
+              </ul>
+              <Link href="/sign-up" className="block">
+                <Button className="w-full bg-white text-indigo-600 hover:bg-indigo-50">Upgrade</Button>
+              </Link>
+            </motion.div>
+          </div>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="px-6 md:px-14 py-8 border-t border-gray-100">
+        <div className="max-w-5xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 rounded bg-indigo-500 flex items-center justify-center">
+              <GraduationCap className="w-3.5 h-3.5 text-white" />
+            </div>
+            <span className="text-sm font-medium text-gray-700">Cards to Study</span>
+          </div>
+          <p className="text-xs text-gray-400">2025 Cards to Study. All rights reserved.</p>
+          <div className="flex items-center gap-5">
+            <Link href="/privacy" className="text-xs text-gray-400 hover:text-gray-700 transition-colors">Privacy</Link>
+            <Link href="/terms" className="text-xs text-gray-400 hover:text-gray-700 transition-colors">Terms</Link>
+            <a href="mailto:support@cardstostudy.app" className="text-xs text-gray-400 hover:text-gray-700 transition-colors">Support</a>
+          </div>
+        </div>
+      </footer>
+
+    </div>
   );
 }

@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
 import Anthropic from "@anthropic-ai/sdk";
-import { getUserByClerkId, createDeck, saveFlashcards } from "@/lib/db";
+import { getOrCreateUser } from "@/lib/auth";
+import {
+  createDeck,
+  saveFlashcards,
+  deleteDeck,
+  reserveGeneration,
+  releaseGeneration,
+  getMonthlyUsage,
+} from "@/lib/db";
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
@@ -9,41 +16,15 @@ const anthropic = new Anthropic({
 
 export const maxDuration = 60;
 
-export async function POST(req: NextRequest) {
-  try {
-    const { userId: clerkId } = await auth();
-    if (!clerkId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
+const CARDS_PER_PDF = 5;
 
-    const user = await getUserByClerkId(clerkId);
-    if (!user) {
-      return NextResponse.json(
-        { error: "User not found. Try refreshing." },
-        { status: 404 }
-      );
-    }
+const MAX_PDF_BYTES = 3_000_000;
+const MAX_BASE64_CHARS = Math.ceil(MAX_PDF_BYTES / 3) * 4;
+const CARD_LEVELS = ["easy", "medium", "hard"];
 
-    const { pdfBase64, fileName, numberOfCards = 5, difficulty = "mixed" } =
-      await req.json();
+const PROMPT = `You are a world-class educator creating flashcards from a document. Your job is to help a student deeply understand this material — not just memorise it.
 
-    if (!pdfBase64 || !fileName) {
-      return NextResponse.json({ error: "Missing PDF data" }, { status: 400 });
-    }
-
-    const deckName = fileName
-      .replace(/\.pdf$/i, "")
-      .replace(/[-_]/g, " ")
-      .trim();
-
-    const difficultyRule =
-      difficulty === "mixed"
-        ? "Mix the difficulties naturally so the deck covers recall, understanding, and application."
-        : `All flashcards must be "${difficulty}" difficulty level.`;
-
-    const prompt = `You are a world-class educator creating flashcards from a document. Your job is to help a student deeply understand this material — not just memorise it.
-
-Read the entire document carefully, then identify the ${numberOfCards} MOST IMPORTANT concepts a student needs to master. Create one flashcard per concept.
+Read the entire document carefully, then identify the ${CARDS_PER_PDF} MOST IMPORTANT concepts a student needs to master. Create one flashcard per concept.
 
 STRICT RULES — follow these exactly:
 
@@ -68,7 +49,7 @@ ANSWERS (back of card)
 - Prioritise clarity and density over length — every sentence must earn its place
 
 DIFFICULTY
-${difficultyRule}
+Mix the difficulties naturally so the deck covers recall, understanding, and application.
 - "easy": Basic recall of a definition, term, or fact
 - "medium": Understanding a concept, relationship, or process
 - "hard": Applying a concept, comparing ideas, or reasoning about implications
@@ -91,76 +72,127 @@ Format:
   }
 ]
 
-Generate exactly ${numberOfCards} flashcards now.`;
+Generate exactly ${CARDS_PER_PDF} flashcards now.`;
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function POST(req: NextRequest) {
+  let userId: number | null = null;
+  let reservationId: number | null = null;
+  let deckId: number | null = null;
+
+ 
+  const fail = async (status: number, error: string) => {
+    try {
+      if (deckId && userId) await deleteDeck(deckId, userId);
+      if (reservationId) await releaseGeneration(reservationId);
+    } catch (e) {
+      console.error("Cleanup failed:", e);
+    }
+    return NextResponse.json({ error }, { status });
+  };
+
+  try {
+    const user = await getOrCreateUser();
+    if (!user) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    userId = user.id;
+
+    const body = await req.json().catch(() => null);
+    const pdfBase64 = body?.pdfBase64;
+    const fileName = body?.fileName;
+
+    if (typeof pdfBase64 !== "string" || typeof fileName !== "string") {
+      return NextResponse.json({ error: "Missing PDF data" }, { status: 400 });
+    }
+    if (pdfBase64.length > MAX_BASE64_CHARS) {
+      return NextResponse.json(
+        { error: "PDF must be under 3MB. Try compressing it or splitting it into chapters." },
+        { status: 413 }
+      );
+    }
+    // "%PDF-" in base64
+    if (!pdfBase64.startsWith("JVBERi0")) {
+      return NextResponse.json({ error: "That doesn't look like a PDF file" }, { status: 400 });
+    }
+
+    const deckName =
+      fileName
+        .slice(0, 200)
+        .replace(/\.pdf$/i, "")
+        .replace(/[-_]/g, " ")
+        .trim() || "Untitled deck";
+
+    const reservation = await reserveGeneration(user.id);
+    if (!reservation.ok) {
+      return NextResponse.json(
+        {
+          error:
+            reservation.reason === "user_limit"
+              ? "You've used all your free PDFs for this month. They reset on the 1st."
+              : "We've hit our daily limit. Please try again tomorrow.",
+        },
+        { status: 429 }
+      );
+    }
+    reservationId = reservation.id;
+
+   
+    const content: any = [
+      {
+        type: "document",
+        source: { type: "base64", media_type: "application/pdf", data: pdfBase64 },
+      },
+      { type: "text", text: PROMPT },
+    ];
+
     const message = await anthropic.messages.create({
       model: "claude-haiku-4-5",
-      max_tokens: 4096,
-      messages: [
-        {
-          role: "user",
-          content: [
-            {
-              type: "document",
-              source: {
-                type: "base64",
-                media_type: "application/pdf",
-                data: pdfBase64,
-              },
-            },
-            { type: "text", text: prompt },
-          ] as any,
-        },
-      ],
+      max_tokens: 2048,
+      messages: [{ role: "user", content }],
     });
 
-    const raw =
-      message.content[0].type === "text" ? message.content[0].text : "";
+    const raw = message.content[0]?.type === "text" ? message.content[0].text : "";
     const cleaned = raw
       .replace(/```json\n?/g, "")
       .replace(/```\n?/g, "")
       .trim();
 
-    let flashcards;
+    let parsed: unknown;
     try {
-      flashcards = JSON.parse(cleaned);
+      parsed = JSON.parse(cleaned);
     } catch {
-      console.error("Failed to parse Claude response:", raw);
-      return NextResponse.json(
-        { error: "Claude returned invalid format. Try again." },
-        { status: 500 }
-      );
+      console.error("Failed to parse AI response:", raw);
+      return fail(500, "We couldn't generate flashcards this time. Please try again.");
     }
 
-    if (!Array.isArray(flashcards) || flashcards.length === 0) {
-      return NextResponse.json(
-        { error: "No flashcards could be generated from this PDF" },
-        { status: 500 }
-      );
+    if (!Array.isArray(parsed) || parsed.length === 0) {
+      return fail(500, "No flashcards could be generated from this PDF.");
     }
 
-    // Quality validation
-    flashcards = flashcards.filter(
-      (c) =>
-        typeof c?.front === "string" &&
-        typeof c?.back === "string" &&
-        c.front.trim().length > 10 &&
-        c.back.trim().length > 50
-    );
+    const flashcards = parsed
+      .filter(
+        (c) =>
+          typeof c?.front === "string" &&
+          typeof c?.back === "string" &&
+          c.front.trim().length > 10 &&
+          c.back.trim().length > 50
+      )
+      .slice(0, CARDS_PER_PDF)
+      .map((c) => ({
+        front: c.front.trim() as string,
+        back: c.back.trim() as string,
+        difficulty: CARD_LEVELS.includes(c.difficulty) ? (c.difficulty as string) : "medium",
+      }));
 
     if (flashcards.length === 0) {
-      return NextResponse.json(
-        {
-          error:
-            "Generated cards didn't meet quality standards. Try a different PDF.",
-        },
-        { status: 500 }
-      );
+      return fail(500, "The generated cards didn't meet our quality standards. Try a different PDF.");
     }
 
-    const deck = await createDeck(user.id, deckName, fileName);
+    const deck = await createDeck(user.id, deckName, fileName.slice(0, 200));
+    deckId = deck.id;
     await saveFlashcards(deck.id, flashcards);
+
+    const usage = await getMonthlyUsage(user.id);
 
     return NextResponse.json({
       success: true,
@@ -168,12 +200,16 @@ Generate exactly ${numberOfCards} flashcards now.`;
       deckName: deck.name,
       flashcards,
       count: flashcards.length,
+      usage,
     });
   } catch (err) {
     console.error("Flashcard generation error:", err);
-    return NextResponse.json(
-      { error: "Something went wrong generating flashcards" },
-      { status: 500 }
-    );
+    if (err instanceof Anthropic.APIError && err.status === 400) {
+      return fail(
+        422,
+        "We couldn't read this PDF. It may be password-protected, corrupted or over 100 pages."
+      );
+    }
+    return fail(500, "Something went wrong generating flashcards.");
   }
 }

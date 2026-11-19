@@ -1,26 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
-import { getUserByClerkId, markCard, updateStreak } from "@/lib/db";
+import { getOrCreateUser } from "@/lib/auth";
+import { markCard, updateStreak } from "@/lib/db";
 
 export async function POST(req: NextRequest) {
-  const { userId: clerkId } = await auth();
-  if (!clerkId) {
+  const user = await getOrCreateUser();
+  if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const user = await getUserByClerkId(clerkId);
-  if (!user) {
-    return NextResponse.json({ error: "User not found" }, { status: 404 });
-  }
+  const body = await req.json().catch(() => null);
+  const flashcardId = Number(body?.flashcardId);
+  const response = body?.response;
 
-  const { flashcardId, response } = await req.json();
-
-  if (!flashcardId || !["again", "hard", "good", "easy"].includes(response)) {
+  if (
+    !Number.isInteger(flashcardId) ||
+    flashcardId <= 0 ||
+    !["again", "hard", "good", "easy"].includes(response)
+  ) {
     return NextResponse.json({ error: "Invalid input" }, { status: 400 });
   }
 
-  const correct = await markCard(flashcardId, response);
-  await updateStreak(user.id);
+  const correct = await markCard(flashcardId, user.id, response);
+  if (correct === null) {
+    return NextResponse.json({ error: "Card not found" }, { status: 404 });
+  }
 
+  await updateStreak(user.id);
   return NextResponse.json({ success: true, correct });
 }

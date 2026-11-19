@@ -1,22 +1,19 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
-import { getUserByClerkId, getUserStats, getUserDecks } from "@/lib/db";
+import { getOrCreateUser } from "@/lib/auth";
+import { getUserStats, getUserDecks, getMonthlyUsage, getTutorUsage } from "@/lib/db";
 
 export async function GET() {
-  const { userId: clerkId } = await auth();
-  if (!clerkId) {
+  const user = await getOrCreateUser();
+  if (!user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const user = await getUserByClerkId(clerkId);
-  if (!user) {
-    return NextResponse.json({ user: null, stats: null, decks: [] });
-  }
-
-  const [stats, decks] = await Promise.all([
+  const [stats, decks, usage, tutorUsage] = await Promise.all([
     getUserStats(user.id),
     getUserDecks(user.id),
+    getMonthlyUsage(user.id),
+    getTutorUsage(user.id),
   ]);
 
-  return NextResponse.json({ user, stats, decks });
+  return NextResponse.json({ user, stats, decks, usage, tutorUsage });
 }

@@ -1,4 +1,5 @@
 import { Pool } from "pg";
+import { nextSchedule, type SrsResponse } from "@/lib/srs";
 
 if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL environment variable is not set");
@@ -7,30 +8,29 @@ if (!process.env.DATABASE_URL) {
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
-  max: 10,
+  max: 5,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
+  connectionTimeoutMillis: 10000, 
 });
 
 export const db = {
   query: (text: string, params?: unknown[]) => pool.query(text, params),
 };
 
-// ── Users ─────────────────────────────────────────────────────────────────
+export const FREE_PDFS_PER_MONTH = 5;
+export const TUTOR_SESSIONS_PER_MONTH = 2;
+export const TUTOR_MESSAGES_PER_SESSION = 20;
+const GLOBAL_DAILY_LIMIT = Number(process.env.MAX_DAILY_PDFS ?? 50);
+const GLOBAL_DAILY_TUTOR_LIMIT = Number(process.env.MAX_DAILY_TUTOR_MESSAGES ?? 300);
+
+
 
 export async function getUserByClerkId(clerkId: string) {
-  const r = await db.query(
-    "SELECT * FROM users WHERE clerk_id = $1",
-    [clerkId]
-  );
+  const r = await db.query("SELECT * FROM users WHERE clerk_id = $1", [clerkId]);
   return r.rows[0] ?? null;
 }
 
-export async function createUser(
-  clerkId: string,
-  email: string,
-  name: string
-) {
+export async function createUser(clerkId: string, email: string, name: string) {
   const r = await db.query(
     `INSERT INTO users (clerk_id, email, name)
      VALUES ($1, $2, $3)
@@ -48,7 +48,12 @@ export async function createUser(
   return r.rows[0];
 }
 
-// ── Decks ──────────────────────────────────────────────────────────────────
+
+export async function deleteUser(userId: number) {
+  await db.query("DELETE FROM users WHERE id = $1", [userId]);
+}
+
+
 
 export async function getUserDecks(userId: number) {
   const r = await db.query(
@@ -58,11 +63,7 @@ export async function getUserDecks(userId: number) {
   return r.rows;
 }
 
-export async function createDeck(
-  userId: number,
-  name: string,
-  filename: string
-) {
+export async function createDeck(userId: number, name: string, filename: string) {
   const r = await db.query(
     `INSERT INTO decks (user_id, name, pdf_filename)
      VALUES ($1, $2, $3)
@@ -72,32 +73,60 @@ export async function createDeck(
   return r.rows[0];
 }
 
-export async function getDeck(deckId: number) {
-  const deck = await db.query("SELECT * FROM decks WHERE id = $1", [deckId]);
+
+export async function getDeckById(deckId: number, userId: number) {
+  const r = await db.query(
+    "SELECT * FROM decks WHERE id = $1 AND user_id = $2",
+    [deckId, userId]
+  );
+  return r.rows[0] ?? null;
+}
+
+
+export async function getDeck(deckId: number, userId: number) {
+  const deck = await getDeckById(deckId, userId);
+  if (!deck) return null;
   const cards = await db.query(
-    "SELECT * FROM flashcards WHERE deck_id = $1 ORDER BY created_at ASC",
+    "SELECT * FROM flashcards WHERE deck_id = $1 ORDER BY created_at ASC, id ASC",
     [deckId]
   );
-  return { ...deck.rows[0], flashcards: cards.rows };
+  return { ...deck, flashcards: cards.rows };
 }
 
-export async function deleteDeck(deckId: number) {
-  await db.query("DELETE FROM decks WHERE id = $1", [deckId]);
+
+export async function deleteDeck(deckId: number, userId: number) {
+  await db.query(
+    `DELETE FROM flashcards
+     WHERE deck_id IN (SELECT id FROM decks WHERE id = $1 AND user_id = $2)`,
+    [deckId, userId]
+  );
+  const r = await db.query(
+    "DELETE FROM decks WHERE id = $1 AND user_id = $2",
+    [deckId, userId]
+  );
+  return (r.rowCount ?? 0) > 0;
 }
 
-// ── Flashcards ─────────────────────────────────────────────────────────────
 
 export async function saveFlashcards(
   deckId: number,
   cards: { front: string; back: string; difficulty: string }[]
 ) {
-  for (const c of cards) {
-    await db.query(
-      `INSERT INTO flashcards (deck_id, front, back, difficulty)
-       VALUES ($1, $2, $3, $4)`,
-      [deckId, c.front, c.back, c.difficulty ?? "medium"]
-    );
-  }
+  if (cards.length === 0) return;
+
+  const values: unknown[] = [];
+  const rows = cards.map((c, i) => {
+    const o = i * 4;
+    values.push(deckId, c.front, c.back, c.difficulty ?? "medium");
+    return `($${o + 1}, $${o + 2}, $${o + 3}, $${o + 4})`;
+  });
+
+  await db.query(
+    `INSERT INTO flashcards (deck_id, front, back, difficulty)
+     VALUES ${rows.join(", ")}`,
+    values
+  );
+
   await db.query(
     `UPDATE decks
      SET total_cards = (SELECT COUNT(*) FROM flashcards WHERE deck_id = $1),
@@ -112,45 +141,37 @@ export async function getDueCards(deckId: number) {
     `SELECT * FROM flashcards
      WHERE deck_id = $1
        AND (next_review IS NULL OR next_review <= NOW())
-     ORDER BY COALESCE(next_review, '1970-01-01') ASC`,
+     ORDER BY COALESCE(next_review, '1970-01-01') ASC, id ASC`,
     [deckId]
   );
   return r.rows;
 }
 
+
+ 
 export async function markCard(
   flashcardId: number,
-  response: "again" | "hard" | "good" | "easy"
-) {
+  userId: number,
+  response: SrsResponse
+): Promise<boolean | null> {
   const cr = await db.query(
-    "SELECT * FROM flashcards WHERE id = $1",
-    [flashcardId]
+    `SELECT f.* FROM flashcards f
+     JOIN decks d ON d.id = f.deck_id
+     WHERE f.id = $1 AND d.user_id = $2`,
+    [flashcardId, userId]
   );
   const card = cr.rows[0];
+  if (!card) return null;
 
-  const q =
-    response === "again" ? 0 :
-    response === "hard"  ? 2 :
-    response === "good"  ? 4 : 5;
-
-  const correct = q >= 3;
-  let ef = parseFloat(card.ease_factor);
-  let interval = parseInt(card.interval_days);
-
-  ef = Math.max(1.3, ef + 0.1 - (5 - q) * (0.08 + (5 - q) * 0.02));
-
-  if (!correct) {
-    interval = 1;
-  } else if (interval <= 1) {
-    interval = 3;
-  } else {
-    interval = Math.round(interval * ef);
-  }
+  const { interval, ease, correct } = nextSchedule(
+    response,
+    parseInt(card.interval_days),
+    parseFloat(card.ease_factor)
+  );
 
   const next = new Date();
   next.setDate(next.getDate() + interval);
 
-  // Update the individual flashcard
   await db.query(
     `UPDATE flashcards
      SET times_studied   = times_studied + 1,
@@ -160,10 +181,9 @@ export async function markCard(
          next_review     = $4,
          last_reviewed   = NOW()
      WHERE id = $5`,
-    [correct ? 1 : 0, ef, interval, next, flashcardId]
+    [correct ? 1 : 0, ease, interval, next, flashcardId]
   );
 
-  // Update deck-level stats (cards_studied count and accuracy %)
   await db.query(
     `UPDATE decks
      SET cards_studied = (
@@ -182,35 +202,69 @@ export async function markCard(
     [card.deck_id]
   );
 
-  // Update user-level stats (total studied + overall accuracy)
-  const deckUser = await db.query(
-    "SELECT user_id FROM decks WHERE id = $1",
-    [card.deck_id]
+  await db.query(
+    `UPDATE user_statistics
+     SET total_cards_studied = total_cards_studied + 1,
+         overall_accuracy = COALESCE(
+           (SELECT ROUND(
+             (SUM(f.times_correct)::decimal / NULLIF(SUM(f.times_studied), 0)) * 100, 2
+           )
+           FROM flashcards f
+           JOIN decks d ON f.deck_id = d.id
+           WHERE d.user_id = $1), 0
+         ),
+         updated_at = NOW()
+     WHERE user_id = $1`,
+    [userId]
   );
-  const userId = deckUser.rows[0]?.user_id;
-
-  if (userId) {
-    await db.query(
-      `UPDATE user_statistics
-       SET total_cards_studied = total_cards_studied + 1,
-           overall_accuracy = COALESCE(
-             (SELECT ROUND(
-               (SUM(f.times_correct)::decimal / NULLIF(SUM(f.times_studied), 0)) * 100, 2
-             )
-             FROM flashcards f
-             JOIN decks d ON f.deck_id = d.id
-             WHERE d.user_id = $1), 0
-           ),
-           updated_at = NOW()
-       WHERE user_id = $1`,
-      [userId]
-    );
-  }
 
   return correct;
 }
 
-// ── Stats ──────────────────────────────────────────────────────────────────
+
+
+export async function getMonthlyUsage(userId: number) {
+  const r = await db.query(
+    `SELECT COUNT(*)::int AS n FROM generation_log
+     WHERE user_id = $1 AND created_at >= date_trunc('month', NOW())`,
+    [userId]
+  );
+  return { used: r.rows[0].n as number, limit: FREE_PDFS_PER_MONTH };
+}
+
+export type Reservation =
+  | { ok: true; id: number }
+  | { ok: false; reason: "user_limit" | "global_limit" };
+
+
+export async function reserveGeneration(userId: number): Promise<Reservation> {
+  const g = await db.query(
+    `SELECT COUNT(*)::int AS n FROM generation_log
+     WHERE created_at > NOW() - INTERVAL '24 hours'`
+  );
+  if (g.rows[0].n >= GLOBAL_DAILY_LIMIT) {
+    return { ok: false, reason: "global_limit" };
+  }
+
+  const ins = await db.query(
+    "INSERT INTO generation_log (user_id) VALUES ($1) RETURNING id",
+    [userId]
+  );
+  const id = ins.rows[0].id as number;
+
+  const { used } = await getMonthlyUsage(userId);
+  if (used > FREE_PDFS_PER_MONTH) {
+    await releaseGeneration(id);
+    return { ok: false, reason: "user_limit" };
+  }
+  return { ok: true, id };
+}
+
+export async function releaseGeneration(id: number) {
+  await db.query("DELETE FROM generation_log WHERE id = $1", [id]);
+}
+
+
 
 export async function getUserStats(userId: number) {
   const r = await db.query(
@@ -255,16 +309,60 @@ export async function updateStreak(userId: number) {
   );
 }
 
-// ── Tutor ──────────────────────────────────────────────────────────────────
 
-export async function createConversation(userId: number, topic: string) {
+
+export async function getTutorUsage(userId: number) {
   const r = await db.query(
-    `INSERT INTO tutor_conversations (user_id, topic)
-     VALUES ($1, $2)
+    `SELECT COUNT(*)::int AS n FROM tutor_conversations
+     WHERE user_id = $1 AND created_at >= date_trunc('month', NOW())`,
+    [userId]
+  );
+  return {
+    used: r.rows[0].n as number,
+    limit: TUTOR_SESSIONS_PER_MONTH,
+    messagesPerSession: TUTOR_MESSAGES_PER_SESSION,
+  };
+}
+
+
+export async function tutorGloballyBusy() {
+  const r = await db.query(
+    `SELECT COUNT(*)::int AS n FROM tutor_messages
+     WHERE role = 'user' AND created_at > NOW() - INTERVAL '24 hours'`
+  );
+  return r.rows[0].n >= GLOBAL_DAILY_TUTOR_LIMIT;
+}
+
+export async function createConversation(
+  userId: number,
+  topic: string,
+  deckId: number | null
+) {
+  const r = await db.query(
+    `INSERT INTO tutor_conversations (user_id, topic, deck_id)
+     VALUES ($1, $2, $3)
      RETURNING *`,
-    [userId, topic]
+    [userId, topic, deckId]
   );
   return r.rows[0];
+}
+
+
+export async function getConversation(conversationId: number, userId: number) {
+  const r = await db.query(
+    "SELECT * FROM tutor_conversations WHERE id = $1 AND user_id = $2",
+    [conversationId, userId]
+  );
+  return r.rows[0] ?? null;
+}
+
+export async function countUserMessages(conversationId: number) {
+  const r = await db.query(
+    `SELECT COUNT(*)::int AS n FROM tutor_messages
+     WHERE conversation_id = $1 AND role = 'user'`,
+    [conversationId]
+  );
+  return r.rows[0].n as number;
 }
 
 export async function saveMessage(
@@ -278,14 +376,19 @@ export async function saveMessage(
      RETURNING *`,
     [conversationId, role, content]
   );
+  await db.query(
+    "UPDATE tutor_conversations SET updated_at = NOW() WHERE id = $1",
+    [conversationId]
+  );
   return r.rows[0];
 }
+
 
 export async function getTutorMessages(conversationId: number) {
   const r = await db.query(
     `SELECT * FROM tutor_messages
      WHERE conversation_id = $1
-     ORDER BY created_at ASC`,
+     ORDER BY created_at ASC, id ASC`,
     [conversationId]
   );
   return r.rows;

@@ -13,6 +13,7 @@ type Deck = {
   name: string;
   total_cards: number;
   cards_studied: number;
+  due_count: number;
   accuracy: string;
   updated_at: string;
 };
@@ -143,6 +144,12 @@ export default function DecksPage() {
               </div>
 
               <div className="flex items-center gap-4 text-xs text-gray-500 mb-4">
+                <div>
+                  <span className={`font-medium ${deck.due_count > 0 ? "text-violet-700" : "text-gray-700"}`}>
+                    {deck.due_count}
+                  </span>{" "}
+                  due
+                </div>
                 <div>
                   <span className="font-medium text-gray-700">{deck.cards_studied}</span> studied
                 </div>

@@ -1,5 +1,6 @@
 import { Pool } from "pg";
 import { nextSchedule, type SrsResponse } from "@/lib/srs";
+import { limitsFor } from "@/lib/plans";
 
 if (!process.env.DATABASE_URL) {
   throw new Error("DATABASE_URL environment variable is not set");
@@ -10,16 +11,13 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false },
   max: 5,
   idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 10000, 
+  connectionTimeoutMillis: 10000,
 });
 
 export const db = {
   query: (text: string, params?: unknown[]) => pool.query(text, params),
 };
 
-export const FREE_PDFS_PER_MONTH = 5;
-export const TUTOR_SESSIONS_PER_MONTH = 2;
-export const TUTOR_MESSAGES_PER_SESSION = 20;
 const GLOBAL_DAILY_LIMIT = Number(process.env.MAX_DAILY_PDFS ?? 50);
 const GLOBAL_DAILY_TUTOR_LIMIT = Number(process.env.MAX_DAILY_TUTOR_MESSAGES ?? 300);
 
@@ -53,11 +51,17 @@ export async function deleteUser(userId: number) {
   await db.query("DELETE FROM users WHERE id = $1", [userId]);
 }
 
-
-
 export async function getUserDecks(userId: number) {
   const r = await db.query(
-    "SELECT * FROM decks WHERE user_id = $1 ORDER BY updated_at DESC",
+    `SELECT d.*,
+       (SELECT COUNT(*)::int FROM flashcards f
+         WHERE f.deck_id = d.id
+           AND (f.next_review IS NULL OR f.next_review <= NOW())) AS due_count,
+       (SELECT MIN(f.next_review) FROM flashcards f
+         WHERE f.deck_id = d.id AND f.next_review > NOW()) AS next_due
+     FROM decks d
+     WHERE d.user_id = $1
+     ORDER BY d.updated_at DESC`,
     [userId]
   );
   return r.rows;
@@ -108,6 +112,7 @@ export async function deleteDeck(deckId: number, userId: number) {
 }
 
 
+
 export async function saveFlashcards(
   deckId: number,
   cards: { front: string; back: string; difficulty: string }[]
@@ -136,6 +141,7 @@ export async function saveFlashcards(
   );
 }
 
+
 export async function getDueCards(deckId: number) {
   const r = await db.query(
     `SELECT * FROM flashcards
@@ -148,7 +154,6 @@ export async function getDueCards(deckId: number) {
 }
 
 
- 
 export async function markCard(
   flashcardId: number,
   userId: number,
@@ -169,8 +174,10 @@ export async function markCard(
     parseFloat(card.ease_factor)
   );
 
+
   const next = new Date();
-  next.setDate(next.getDate() + interval);
+  next.setUTCDate(next.getUTCDate() + interval);
+  next.setUTCHours(0, 0, 0, 0);
 
   await db.query(
     `UPDATE flashcards
@@ -223,13 +230,13 @@ export async function markCard(
 
 
 
-export async function getMonthlyUsage(userId: number) {
+export async function getMonthlyUsage(userId: number, tier?: string | null) {
   const r = await db.query(
     `SELECT COUNT(*)::int AS n FROM generation_log
      WHERE user_id = $1 AND created_at >= date_trunc('month', NOW())`,
     [userId]
   );
-  return { used: r.rows[0].n as number, limit: FREE_PDFS_PER_MONTH };
+  return { used: r.rows[0].n as number, limit: limitsFor(tier).pdfsPerMonth };
 }
 
 export type Reservation =
@@ -237,7 +244,10 @@ export type Reservation =
   | { ok: false; reason: "user_limit" | "global_limit" };
 
 
-export async function reserveGeneration(userId: number): Promise<Reservation> {
+export async function reserveGeneration(
+  userId: number,
+  tier?: string | null
+): Promise<Reservation> {
   const g = await db.query(
     `SELECT COUNT(*)::int AS n FROM generation_log
      WHERE created_at > NOW() - INTERVAL '24 hours'`
@@ -252,8 +262,8 @@ export async function reserveGeneration(userId: number): Promise<Reservation> {
   );
   const id = ins.rows[0].id as number;
 
-  const { used } = await getMonthlyUsage(userId);
-  if (used > FREE_PDFS_PER_MONTH) {
+  const { used, limit } = await getMonthlyUsage(userId, tier);
+  if (used > limit) {
     await releaseGeneration(id);
     return { ok: false, reason: "user_limit" };
   }
@@ -311,7 +321,8 @@ export async function updateStreak(userId: number) {
 
 
 
-export async function getTutorUsage(userId: number) {
+export async function getTutorUsage(userId: number, tier?: string | null) {
+  const limits = limitsFor(tier);
   const r = await db.query(
     `SELECT COUNT(*)::int AS n FROM tutor_conversations
      WHERE user_id = $1 AND created_at >= date_trunc('month', NOW())`,
@@ -319,8 +330,8 @@ export async function getTutorUsage(userId: number) {
   );
   return {
     used: r.rows[0].n as number,
-    limit: TUTOR_SESSIONS_PER_MONTH,
-    messagesPerSession: TUTOR_MESSAGES_PER_SESSION,
+    limit: limits.tutorSessionsPerMonth,
+    messagesPerSession: limits.tutorMessagesPerSession,
   };
 }
 
@@ -399,7 +410,7 @@ export async function getUserConversations(userId: number) {
     `SELECT * FROM tutor_conversations
      WHERE user_id = $1
      ORDER BY updated_at DESC
-     LIMIT 20`,
+     LIMIT 50`,
     [userId]
   );
   return r.rows;

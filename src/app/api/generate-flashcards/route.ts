@@ -110,7 +110,7 @@ export async function POST(req: NextRequest) {
         { status: 413 }
       );
     }
-    // "%PDF-" in base64
+    
     if (!pdfBase64.startsWith("JVBERi0")) {
       return NextResponse.json({ error: "That doesn't look like a PDF file" }, { status: 400 });
     }
@@ -122,7 +122,7 @@ export async function POST(req: NextRequest) {
         .replace(/[-_]/g, " ")
         .trim() || "Untitled deck";
 
-    const reservation = await reserveGeneration(user.id);
+    const reservation = await reserveGeneration(user.id, user.subscription_tier);
     if (!reservation.ok) {
       return NextResponse.json(
         {
@@ -192,7 +192,7 @@ export async function POST(req: NextRequest) {
     deckId = deck.id;
     await saveFlashcards(deck.id, flashcards);
 
-    const usage = await getMonthlyUsage(user.id);
+    const usage = await getMonthlyUsage(user.id, user.subscription_tier);
 
     return NextResponse.json({
       success: true,

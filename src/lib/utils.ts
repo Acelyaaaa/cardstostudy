@@ -41,3 +41,11 @@ export function calculateAccuracy(correct: number, total: number): number {
   if (total === 0) return 0;
   return Math.round((correct / total) * 100);
 }
+
+export function formatNextDue(date: Date | string): string {
+  const d = typeof date === "string" ? new Date(date) : date;
+  const days = Math.ceil((d.getTime() - Date.now()) / 86400000);
+  if (days <= 1) return "tomorrow";
+  if (days < 7) return `in ${days} days`;
+  return d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
